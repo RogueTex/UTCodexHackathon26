@@ -15,6 +15,11 @@ export type LocationHint = {
   openStreetMapLinkUrl: string;
 };
 
+export type Coordinates = {
+  latitude: number;
+  longitude: number;
+};
+
 type CampusLandmark = {
   label: string;
   latitude: number;
@@ -33,6 +38,41 @@ const CAMPUS_LANDMARKS: CampusLandmark[] = [
   { label: "Gregory Gym", latitude: 30.28491, longitude: -97.73683 },
   { label: "Main Mall", latitude: 30.28623, longitude: -97.73935 },
   { label: "Jester Residence Hall", latitude: 30.28373, longitude: -97.73636 },
+];
+
+export const DEFAULT_FORM_MAP_COORDINATES: Coordinates = {
+  latitude: 30.28282,
+  longitude: -97.73812,
+};
+
+const BUILDING_COORDINATE_HINTS: Array<{
+  keywords: string[];
+  coordinates: Coordinates;
+}> = [
+  {
+    keywords: ["pcl", "perry castaneda", "perry-castaneda"],
+    coordinates: { latitude: 30.28282, longitude: -97.73812 },
+  },
+  {
+    keywords: ["texas union"],
+    coordinates: { latitude: 30.28605, longitude: -97.74142 },
+  },
+  {
+    keywords: ["welch"],
+    coordinates: { latitude: 30.28861, longitude: -97.73579 },
+  },
+  {
+    keywords: ["gregory"],
+    coordinates: { latitude: 30.28491, longitude: -97.73683 },
+  },
+  {
+    keywords: ["main mall"],
+    coordinates: { latitude: 30.28623, longitude: -97.73935 },
+  },
+  {
+    keywords: ["jester"],
+    coordinates: { latitude: 30.28373, longitude: -97.73636 },
+  },
 ];
 
 function toRadians(value: number): number {
@@ -58,7 +98,7 @@ function distanceMeters(
   return earthRadiusMeters * c;
 }
 
-function buildOpenStreetMapUrls(latitude: number, longitude: number) {
+export function buildOpenStreetMapUrls(latitude: number, longitude: number) {
   const latDelta = 0.0028;
   const lngDelta = 0.0036;
   const bbox = [
@@ -75,6 +115,16 @@ function buildOpenStreetMapUrls(latitude: number, longitude: number) {
     openStreetMapEmbedUrl: `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${marker}`,
     openStreetMapLinkUrl: `https://www.openstreetmap.org/?mlat=${latitude.toFixed(6)}&mlon=${longitude.toFixed(6)}#map=17/${latitude.toFixed(6)}/${longitude.toFixed(6)}`,
   };
+}
+
+export function resolveFormMapCoordinates(buildingName: string | undefined): Coordinates {
+  const normalizedBuilding = buildingName?.trim().toLowerCase() ?? "";
+  for (const hint of BUILDING_COORDINATE_HINTS) {
+    if (hint.keywords.some((keyword) => normalizedBuilding.includes(keyword))) {
+      return hint.coordinates;
+    }
+  }
+  return DEFAULT_FORM_MAP_COORDINATES;
 }
 
 function inferCampusLabel(latitude: number, longitude: number) {

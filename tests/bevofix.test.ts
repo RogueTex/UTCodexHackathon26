@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyzeSubmission } from "../lib/ai";
-import { buildLocationHint } from "../lib/location-hints";
+import { buildLocationHint, resolveFormMapCoordinates } from "../lib/location-hints";
 import { normalizeIssueType, resolveTeamFromIssue } from "../lib/routing";
 import {
   normalizeFixExtraction,
@@ -43,8 +43,10 @@ test("routing maps fix categories to the expected teams", () => {
 });
 
 test("analysis uses seeded fallback when no live model is configured", async () => {
-  const previousKey = process.env.OPENAI_API_KEY;
-  delete process.env.OPENAI_API_KEY;
+  const previousHuggingFaceKey = process.env.HUGGINGFACE_API_KEY;
+  const previousHfKey = process.env.HF_API_KEY;
+  delete process.env.HUGGINGFACE_API_KEY;
+  delete process.env.HF_API_KEY;
 
   const response = await analyzeSubmission({
     mode: "fix",
@@ -58,8 +60,11 @@ test("analysis uses seeded fallback when no live model is configured", async () 
   assert.equal(response.locationHint?.label, "PCL study area");
   assert.equal(response.workflowLabels.includes("Validation Skill"), true);
 
-  if (previousKey) {
-    process.env.OPENAI_API_KEY = previousKey;
+  if (previousHuggingFaceKey) {
+    process.env.HUGGINGFACE_API_KEY = previousHuggingFaceKey;
+  }
+  if (previousHfKey) {
+    process.env.HF_API_KEY = previousHfKey;
   }
 });
 
@@ -75,9 +80,23 @@ test("metadata coordinates resolve to a campus landmark hint", () => {
   assert.equal(hint?.openStreetMapEmbedUrl.includes("openstreetmap.org"), true);
 });
 
+test("form map resolves known building names to landmark coordinates", () => {
+  const texasUnionCoordinates = resolveFormMapCoordinates("Texas Union");
+  assert.equal(texasUnionCoordinates.latitude, 30.28605);
+  assert.equal(texasUnionCoordinates.longitude, -97.74142);
+});
+
+test("form map falls back to PCL coordinates for unknown building names", () => {
+  const fallbackCoordinates = resolveFormMapCoordinates("Unknown spot");
+  assert.equal(fallbackCoordinates.latitude, 30.28282);
+  assert.equal(fallbackCoordinates.longitude, -97.73812);
+});
+
 test("analysis uses uploaded metadata as location hint for weak fallback output", async () => {
-  const previousKey = process.env.OPENAI_API_KEY;
-  delete process.env.OPENAI_API_KEY;
+  const previousHuggingFaceKey = process.env.HUGGINGFACE_API_KEY;
+  const previousHfKey = process.env.HF_API_KEY;
+  delete process.env.HUGGINGFACE_API_KEY;
+  delete process.env.HF_API_KEY;
 
   const response = await analyzeSubmission({
     mode: "signal",
@@ -93,7 +112,10 @@ test("analysis uses uploaded metadata as location hint for weak fallback output"
   assert.equal(response.extraction.likely_location, "Texas Union");
   assert.equal(response.locationHint?.source, "exif");
 
-  if (previousKey) {
-    process.env.OPENAI_API_KEY = previousKey;
+  if (previousHuggingFaceKey) {
+    process.env.HUGGINGFACE_API_KEY = previousHuggingFaceKey;
+  }
+  if (previousHfKey) {
+    process.env.HF_API_KEY = previousHfKey;
   }
 });

@@ -4,4 +4,9 @@ dist
 storage/*.json
 !.gitkeep
 *.log
-
+.DS_Store
+.env
+.env.local
+.env.*.local
+DataImages/
+lib/reference-embeddings.ts

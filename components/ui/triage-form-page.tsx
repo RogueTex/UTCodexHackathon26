@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  buildOpenStreetMapUrls,
+  resolveFormMapCoordinates,
+} from "@/lib/location-hints";
+import {
   fileToDataUrl,
   readUiUploadDraft,
   UiUploadDraft,
@@ -33,35 +37,35 @@ function toNowString(): string {
 }
 
 export function TriageFormPage() {
-  const mapRef = useRef<HTMLDivElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
   const [issueSelected, setIssueSelected] = useState(true);
   const [announcementSelected, setAnnouncementSelected] = useState(true);
   const [building, setBuilding] = useState("PCL Library");
   const [floor, setFloor] = useState("3rd Floor");
-  const [pin, setPin] = useState({ x: 50, y: 50 });
   const [uploadDraft, setUploadDraft] = useState<UiUploadDraft>();
+  const [sharedLocation, setSharedLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [sharingLocation, setSharingLocation] = useState(false);
+  const [locationError, setLocationError] = useState<string>();
 
   const flagCount = Number(issueSelected) + Number(announcementSelected);
   const submitLabel = `${flagCount} flag${flagCount === 1 ? "" : "s"}`;
-
-  function onMapPointer(
-    event:
-      | React.PointerEvent<HTMLDivElement>
-      | React.MouseEvent<HTMLDivElement, MouseEvent>,
-  ) {
-    if (!mapRef.current) {
-      return;
+  const mapCoordinates = useMemo(() => {
+    if (sharedLocation) {
+      return sharedLocation;
     }
-
-    const rect = mapRef.current.getBoundingClientRect();
-    const nextX = ((event.clientX - rect.left) / rect.width) * 100;
-    const nextY = ((event.clientY - rect.top) / rect.height) * 100;
-    setPin({
-      x: Math.max(4, Math.min(96, nextX)),
-      y: Math.max(6, Math.min(96, nextY)),
-    });
-  }
+    return resolveFormMapCoordinates(building);
+  }, [building, sharedLocation]);
+  const mapUrls = useMemo(
+    () =>
+      buildOpenStreetMapUrls(
+        mapCoordinates.latitude,
+        mapCoordinates.longitude,
+      ),
+    [mapCoordinates.latitude, mapCoordinates.longitude],
+  );
 
   const detectedText = useMemo(
     () => `AI detected: Broken chair - ${building}`,
@@ -78,6 +82,41 @@ export function TriageFormPage() {
   useEffect(() => {
     setUploadDraft(readUiUploadDraft());
   }, []);
+
+  function shareCurrentLocation() {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setLocationError("Location sharing is not supported on this device/browser.");
+      return;
+    }
+
+    setSharingLocation(true);
+    setLocationError(undefined);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setSharedLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setSharingLocation(false);
+      },
+      (error) => {
+        let message = "Unable to share location right now.";
+        if (error.code === error.PERMISSION_DENIED) {
+          message = "Location permission denied. Enable it in your browser settings.";
+        } else if (error.code === error.TIMEOUT) {
+          message = "Location request timed out. Please try again.";
+        }
+        setLocationError(message);
+        setSharingLocation(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 120000,
+      },
+    );
+  }
 
   function openReplacePhotoPicker() {
     replaceInputRef.current?.click();
@@ -148,6 +187,33 @@ export function TriageFormPage() {
             <span className="font-mono text-xs text-ut-mid">{fileLabel}</span>
             <span className="text-xs font-semibold text-ut-burnt">✦ Fields auto-filled</span>
           </div>
+          <div className="border-t border-ut-faint/70 px-5 pb-4 pt-3">
+            <button
+              type="button"
+              onClick={shareCurrentLocation}
+              disabled={sharingLocation}
+              className="rounded-full bg-ut-burnt px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-ut-burntHover disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {sharingLocation
+                ? "Sharing location..."
+                : sharedLocation
+                  ? "Update shared location"
+                  : "Share my location"}
+            </button>
+            {sharedLocation ? (
+              <p className="mt-2 font-mono text-[11px] text-ut-mid">
+                Shared location: {sharedLocation.latitude.toFixed(5)},{" "}
+                {sharedLocation.longitude.toFixed(5)}
+              </p>
+            ) : (
+              <p className="mt-2 text-[11px] text-ut-mid">
+                Optional: share your current location to improve the map preview.
+              </p>
+            )}
+            {locationError ? (
+              <p className="mt-1 text-[11px] font-semibold text-[#9A3412]">{locationError}</p>
+            ) : null}
+          </div>
         </div>
 
         <div className="mb-6 flex items-start gap-3 rounded-utSm border border-ut-burnt/20 bg-gradient-to-br from-[#FFF5EE] to-[#FFEEDD] px-5 py-4">
@@ -204,35 +270,33 @@ export function TriageFormPage() {
           </section>
 
           <section className="overflow-hidden rounded-ut bg-ut-white shadow-utSm">
-            <div
-              ref={mapRef}
-              className="map-grid-fine relative h-44 cursor-crosshair bg-gradient-to-br from-[#C8E0C8] via-[#B0D0B8] to-[#A8CCA8]"
-              onPointerDown={onMapPointer}
-              onPointerMove={(event) => {
-                if ((event.buttons & 1) === 1) {
-                  onMapPointer(event);
-                }
-              }}
-            >
-              <div className="absolute inset-x-0 top-1/2 h-3.5 -translate-y-1/2 bg-white/70" />
-              <div className="absolute inset-y-0 left-[35%] w-2.5 bg-white/60" />
-              <div
-                className="absolute z-10 -translate-x-1/2 -translate-y-full"
-                style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
-              >
-                <div className="flex h-8 w-8 rotate-[-45deg] items-center justify-center rounded-[50%_50%_50%_0] bg-ut-burnt shadow-[0_4px_12px_rgba(192,80,26,0.5)]">
-                  <div className="h-3 w-3 rotate-45 rounded-full bg-white" />
-                </div>
-              </div>
-              <div className="absolute bottom-2 right-2 rounded bg-white/80 px-2 py-0.5 text-[10px] font-semibold text-ut-mid">
-                © OpenStreetMap
-              </div>
+            <div className="relative h-44 overflow-hidden border-y border-ut-faint/70 bg-[#E8EFEA]">
+              <iframe
+                title={`OpenStreetMap preview near ${building || "PCL study area"}`}
+                src={mapUrls.openStreetMapEmbedUrl}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                className="h-full w-full border-0"
+              />
             </div>
 
             <div className="p-6">
-              <p className="mb-3 text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
-                Location <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">AI filled</span>
-              </p>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <p className="text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
+                  Location{" "}
+                  <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">
+                    AI filled
+                  </span>
+                </p>
+                <a
+                  href={mapUrls.openStreetMapLinkUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs font-semibold text-ut-burnt hover:text-ut-burntHover"
+                >
+                  Open larger map
+                </a>
+              </div>
               <div className="mb-3 grid grid-cols-2 gap-3">
                 <div className="rounded-xl bg-ut-cream p-3">
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-[1.5px] text-ut-mid">
