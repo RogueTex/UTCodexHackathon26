@@ -1,0 +1,133 @@
+[
+  {
+    "filename": "ceiling-collapse-at-ut-austin-s-norman-hackerman-building-prompts-evacuation.jpg",
+    "mode": "fix",
+    "text": "Norman Hackermann building ceiling collapsed room unusable December 24 2025 1pm be careful evacuation",
+    "extraction": {
+      "mode": "fix",
+      "issue_type": "broken furniture",
+      "summary": "Ceiling collapsed at the Norman Hackerman building and the room is currently unusable. Please avoid the area until facilities resolves it.",
+      "likely_location": "Norman Hackerman Building",
+      "urgency": "high",
+      "suggested_team": "Facilities",
+      "confidence": 0.93,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "first-50-free-food-playabowl.jpg",
+    "mode": "signal",
+    "text": "Free Acai Bowls first 50 people MLK location 8am onwards February 28 2026",
+    "extraction": {
+      "mode": "signal",
+      "title": "Free acai bowls at MLK location",
+      "summary": "First 50 people in line at the MLK location can get free acai bowls starting at 8:00 AM.",
+      "likely_location": "MLK location",
+      "expiration_time": "February 28, 2026 8:00 AM onwards",
+      "confidence": 0.92,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "free-boba.jpg",
+    "mode": "signal",
+    "text": "free boba outside McCombs North Entrance between 1pm and 2pm all students January 23 2025",
+    "extraction": {
+      "mode": "signal",
+      "title": "Free boba outside McCombs North Entrance",
+      "summary": "Free boba is available outside McCombs North Entrance for all students between 1:00 PM and 2:00 PM.",
+      "likely_location": "McCombs North Entrance",
+      "expiration_time": "January 23, 2025 2:00 PM",
+      "confidence": 0.92,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "free-candy-snacks.jpg",
+    "mode": "signal",
+    "text": "free swedish snacks on speedway between 4pm and 5pm Monday 22 february 2026",
+    "extraction": {
+      "mode": "signal",
+      "title": "Free Swedish snacks on Speedway",
+      "summary": "Free Swedish snacks are available on Speedway between 4:00 PM and 5:00 PM.",
+      "likely_location": "Speedway",
+      "expiration_time": "Monday, February 22, 2026 5:00 PM",
+      "confidence": 0.9,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "Why is there a hole in Dean Keeton _ r_UTAustin.png",
+    "mode": "fix",
+    "text": "Huge pothole in Dean Keeton near UT Law school March 4 2026 avoid cars and bikes reported 3pm unresolved",
+    "extraction": {
+      "mode": "fix",
+      "issue_type": "broken furniture",
+      "summary": "Large pothole near UT Law School on Dean Keeton. Avoid driving cars and bikes through the area until resolved.",
+      "likely_location": "Dean Keeton near UT Law School",
+      "urgency": "high",
+      "suggested_team": "Facilities",
+      "confidence": 0.94,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "Dim_Lights_PCL.jpeg",
+    "mode": "fix",
+    "text": "Dim lights at PCL Library second floor flickering March 2 2026 4pm not suitable for studying",
+    "extraction": {
+      "mode": "fix",
+      "issue_type": "lighting / electrical",
+      "summary": "Lights on PCL Library 2nd floor are dim and flickering, making the area unsuitable for studying.",
+      "likely_location": "PCL Library 2nd floor",
+      "urgency": "high",
+      "suggested_team": "Facilities",
+      "confidence": 0.92,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "clogged_toilet.jpg",
+    "mode": "fix",
+    "text": "toilets in PCL out of order and repeatedly clogged since 3pm today restroom unusable overflow risk",
+    "extraction": {
+      "mode": "fix",
+      "issue_type": "cleanliness",
+      "summary": "Toilets in PCL have been out of order and repeatedly clogged since 3:00 PM today. Restroom service is needed.",
+      "likely_location": "PCL restrooms",
+      "urgency": "high",
+      "suggested_team": "Custodial",
+      "confidence": 0.95,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "I-35 Fire Near UT Austin.jpeg",
+    "mode": "signal",
+    "text": "large fire near I-35 by UT Austin heavy smoke active fire trucks avoid area traffic impacts",
+    "extraction": {
+      "mode": "signal",
+      "title": "Large fire near UT Austin on I-35",
+      "summary": "There is a major fire with heavy smoke near I-35 by UT Austin. Avoid the area and expect traffic disruptions.",
+      "likely_location": "I-35 near UT Austin",
+      "expiration_time": "Today, 11:59 PM",
+      "confidence": 0.9,
+      "needs_user_confirmation": true
+    }
+  },
+  {
+    "filename": "power-socket-pcl-floor3-broken.jpg",
+    "mode": "fix",
+    "text": "broken power socket at PCL floor 3 outlet not usable device charging issue electrical repair needed",
+    "extraction": {
+      "mode": "fix",
+      "issue_type": "lighting / electrical",
+      "summary": "A power outlet on PCL floor 3 appears damaged and unusable for charging devices. Electrical maintenance is needed.",
+      "likely_location": "PCL floor 3",
+      "urgency": "medium",
+      "suggested_team": "Electrical Services",
+      "confidence": 0.93,
+      "needs_user_confirmation": true
+    }
+  }
+]

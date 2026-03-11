@@ -2,11 +2,12 @@ import { NextResponse } from "next/server";
 
 import { analyzeSubmission } from "@/lib/ai";
 import { isMode } from "@/lib/bevofix";
+import { logMetadataEvent } from "@/lib/debug";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
-  const startedAt = Date.now();
+  const runtimeApiKey = request.headers.get("x-openai-api-key")?.trim() || undefined;
   const body = (await request.json()) as {
     mode?: string;
     imageDataUrl?: string;
@@ -21,40 +22,37 @@ export async function POST(request: Request) {
     };
   };
 
-  if (!body.mode || !isMode(body.mode)) {
+  if (body.mode && !isMode(body.mode)) {
     return NextResponse.json({ error: "Invalid mode." }, { status: 400 });
   }
 
-  if (process.env.NODE_ENV !== "test") {
-    console.info(
-      `[bevofix:route] analyze_start ${JSON.stringify({
-        mode: body.mode,
-        imageName: body.imageName ?? "n/a",
-        hasImageDataUrl: Boolean(body.imageDataUrl),
-        hasExampleId: Boolean(body.exampleId),
-      })}`,
-    );
-  }
+  const mode = body.mode && isMode(body.mode) ? body.mode : undefined;
+
+  logMetadataEvent("analyze route received request", {
+    mode,
+    exampleId: body.exampleId,
+    hasPhotoMetadata: Boolean(body.photoMetadata),
+    latitude: body.photoMetadata?.latitude,
+    longitude: body.photoMetadata?.longitude,
+  });
 
   const analysis = await analyzeSubmission({
-    mode: body.mode,
+    mode,
     imageDataUrl: body.imageDataUrl,
     imageName: body.imageName,
     notes: body.notes,
     exampleId: body.exampleId,
     photoMetadata: body.photoMetadata,
+    runtimeApiKey,
   });
 
-  if (process.env.NODE_ENV !== "test") {
-    console.info(
-      `[bevofix:route] analyze_complete ${JSON.stringify({
-        mode: body.mode,
-        imageName: body.imageName ?? "n/a",
-        source: analysis.source,
-        totalMs: Date.now() - startedAt,
-      })}`,
-    );
-  }
+  logMetadataEvent("analyze route returning response", {
+    mode,
+    source: analysis.source,
+    detectedType: analysis.draft.detected_type,
+    extractedLocation: analysis.draft.location.text,
+    metadataHint: analysis.locationHint?.label,
+  });
 
   return NextResponse.json(analysis);
 }

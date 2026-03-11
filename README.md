@@ -73,19 +73,33 @@ Validate extraction normalization, location metadata behavior, and cross-route s
 
 ### 3) Usage of Codex Application (25%)
 - Codex-assisted architecture and implementation across route design, API scaffolding, and workflow composition.
-- Codex-driven iteration for test coverage, normalization logic, and UI flow improvements.
-- Codex used as an active engineering collaborator for rapid but controlled delivery.
+- Codex terminal control + worktree workflows were used to safely parallelize feature work, hotfixes, and merge-ready validation.
+- BYOK, fallback AI orchestration, deterministic reference matching, and review UX were iterated rapidly with Codex in the loop.
+- Codex-driven test/build verification (`npm test`, `npm run build`) was used repeatedly before demo sign-off.
 
 ### 4) Creative Usage of Codex Skills (25%)
-- Structured use of skills-based workflows to accelerate feature handoff, UI refinement, and technical clarity.
-- Applied Codex for both product-level decisions and code-level robustness (fallbacks, contracts, routing).
-- Demonstrates creative use beyond autocomplete: system design, evaluation framing, and judge-ready communication.
+- **Yeet skill**: staged, committed, pushed, and prepared PR-ready workflows with GitHub CLI automation.
+- **Notion skills** (`notion-spec-to-implementation`, `notion-knowledge-capture`, `notion-meeting-intelligence`): transformed specs/meeting notes into implementation plans, decision logs, and progress-tracking docs.
+- **Playwright skill**: browser automation for end-to-end checks (`/form -> /feed`, submit flows, regression checks) during rapid UI iteration.
+- **Imagegen skill**: generated synthetic test visuals for vision-style edge cases to stress-test AI extraction behavior and fallback matching quality.
+- **Frontend-design skill**: accelerated UI polish while preserving a cohesive product identity for demo clarity.
+- **Create-plan + gh-fix-ci workflows**: structured execution plans and fast debugging loops for reliability under hackathon timelines.
+- Overall: skills were used as an engineering system (planning, coding, validation, docs, release), not just code autocomplete.
 
 ## Local Development
 ```bash
 npm install
 npm run dev
 ```
+
+## BYOK (Bring Your Own Key)
+- The app supports runtime BYOK for image analysis.
+- In `/form` or `/report/[mode]`, paste an OpenAI API key (`sk-...`) in the **Bring your own key** input.
+- Click **Save key** to persist it in browser localStorage.
+- Analyze requests then use your key via `x-openai-api-key`; if no key is provided, the app uses deterministic fallback behavior.
+
+## Demo Video
+- [BevoFix Demo Recording (Loom)](https://www.loom.com/share/1e8583a0a1184f0193b6c7fc426135ae)
 
 ## Validation Commands
 ```bash

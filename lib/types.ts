@@ -40,6 +40,7 @@ export type AnalyzeRequest = {
   notes?: string;
   exampleId?: string;
   photoMetadata?: PhotoMetadata;
+  runtimeApiKey?: string;
 };
 
 export type AnalyzeResponse = {

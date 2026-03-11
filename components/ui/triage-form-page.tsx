@@ -1,20 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
-
-import { Mode } from "@/lib/bevofix";
+import { useRouter } from "next/navigation";
 import {
-  buildOpenStreetMapUrls,
-  resolveFormMapCoordinates,
-} from "@/lib/location-hints";
-import { AnalyzeResponse } from "@/lib/types";
+  type ChangeEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+
 import {
   fileToDataUrl,
   readUiUploadDraft,
-  UiUploadDraft,
+  type UiUploadDraft,
   writeUiUploadDraft,
 } from "@/lib/ui-upload-draft";
+import { clearByokApiKey, readByokApiKey, writeByokApiKey } from "@/lib/byok";
+import { buildOpenStreetMapUrls } from "@/lib/location-hints";
+import { prependUiFeedPost, type UiFeedType } from "@/lib/ui-feed-store";
+import type { AnalyzeResponse } from "@/lib/types";
 
 const CATEGORY_OPTIONS = [
   "Furniture & Fixtures",
@@ -38,122 +43,85 @@ function toNowString(): string {
   }).format(new Date());
 }
 
-function inferModeFromFileName(fileName: string | undefined): Mode {
-  const normalized = (fileName ?? "").toLowerCase();
-  const signalHints = ["free", "food", "boba", "snack", "event", "playa", "acai"];
-  if (signalHints.some((hint) => normalized.includes(hint))) {
-    return "signal";
-  }
-  return "fix";
-}
-
-function toIssueLabel(issueType: string): string {
+function formatIssueType(issueType: string): string {
   return issueType
     .split("/")
-    .join(" ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/\b\w/g, (value) => value.toUpperCase());
+    .map((part) => part.trim())
+    .join(" / ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function mapFixCategory(issueType: string): string {
-  const value = issueType.toLowerCase();
-  if (value.includes("lighting") || value.includes("electrical")) {
+function mapIssueTypeToCategory(issueType: string): string {
+  const normalized = issueType.trim().toLowerCase();
+  if (normalized.includes("light") || normalized.includes("electrical")) {
     return "Lighting";
   }
-  if (value.includes("wifi") || value.includes("computer") || value.includes("tech")) {
+  if (normalized.includes("furniture") || normalized.includes("chair")) {
+    return "Furniture & Fixtures";
+  }
+  if (normalized.includes("water")) {
+    return "Restrooms";
+  }
+  if (
+    normalized.includes("wifi") ||
+    normalized.includes("internet") ||
+    normalized.includes("charger") ||
+    normalized.includes("computer")
+  ) {
     return "WiFi / Tech";
   }
-  if (value.includes("furniture")) {
-    return "Furniture & Fixtures";
+  if (normalized.includes("clean")) {
+    return "Restrooms";
   }
   return "Furniture & Fixtures";
 }
 
-function mapSignalCategory(title: string): string {
-  const value = title.toLowerCase();
-  if (value.includes("free") || value.includes("food") || value.includes("boba")) {
-    return "Free Food / Events";
-  }
-  if (value.includes("announce")) {
-    return "Announcements";
-  }
-  return "Pop-up / Activities";
+function buildTitleFromExtraction(issueType: string, summary: string): string {
+  const issueLabel = formatIssueType(issueType);
+  const clippedSummary = summary.trim().slice(0, 80);
+  return clippedSummary ? `${issueLabel}: ${clippedSummary}` : issueLabel;
 }
 
-function splitLocationFields(
-  likelyLocation: string,
-): { building: string; floor: string } {
-  const trimmed = likelyLocation.trim();
-  if (!trimmed || trimmed.toLowerCase() === "needs confirmation") {
-    return { building: "PCL Library", floor: "Needs confirmation" };
+function parseCoordinate(value: string): number | undefined {
+  if (!value.trim()) {
+    return undefined;
   }
-
-  const floorMatch = trimmed.match(/(\d+(st|nd|rd|th)\s+floor|floor\s*\w+|room\s*\w+)/i);
-  if (floorMatch && floorMatch[0]) {
-    const floor = floorMatch[0].trim();
-    const building = trimmed.replace(floorMatch[0], "").replace(/[-,]\s*$/, "").trim();
-    return {
-      building: building || trimmed,
-      floor,
-    };
-  }
-
-  return { building: trimmed, floor: "Needs confirmation" };
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 export function TriageFormPage() {
+  const router = useRouter();
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
-  const lastAnalyzedKeyRef = useRef<string | undefined>(undefined);
+
   const [issueSelected, setIssueSelected] = useState(true);
   const [announcementSelected, setAnnouncementSelected] = useState(true);
   const [building, setBuilding] = useState("PCL Library");
   const [floor, setFloor] = useState("3rd Floor");
-  const [title, setTitle] = useState("Campus issue reported");
-  const [description, setDescription] = useState(
-    "AI will auto-fill this summary after image analysis.",
-  );
-  const [category, setCategory] = useState(CATEGORY_OPTIONS[0]);
+  const [latitudeInput, setLatitudeInput] = useState("");
+  const [longitudeInput, setLongitudeInput] = useState("");
+  const [geoStatus, setGeoStatus] = useState<string>();
   const [uploadDraft, setUploadDraft] = useState<UiUploadDraft>();
-  const [analysis, setAnalysis] = useState<AnalyzeResponse>();
-  const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [analysisError, setAnalysisError] = useState<string>();
-  const [sharedLocation, setSharedLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
-  const [sharingLocation, setSharingLocation] = useState(false);
-  const [locationError, setLocationError] = useState<string>();
+
+  const [title, setTitle] = useState("Broken chair leg in PCL 3rd floor study area");
+  const [description, setDescription] = useState(
+    "Chair leg is cracked and poses a fall risk. Right side, near the window row. About 3 chairs affected.",
+  );
+  const [category, setCategory] = useState("Furniture & Fixtures");
+  const [incidentTime] = useState(() => `Now - ${toNowString()}`);
+  const [analysisState, setAnalysisState] = useState<"idle" | "loading" | "done" | "error">(
+    "idle",
+  );
+  const [analysisSource, setAnalysisSource] = useState<"live" | "fallback" | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState<string | undefined>();
+  const [analysisLocation, setAnalysisLocation] = useState<AnalyzeResponse["draft"]["location"]>();
+  const [detectedText, setDetectedText] = useState("AI detected: Broken chair - PCL Library");
+  const [byokApiKey, setByokApiKey] = useState("");
+  const [byokStatus, setByokStatus] = useState<string>();
 
   const flagCount = Number(issueSelected) + Number(announcementSelected);
   const submitLabel = `${flagCount} flag${flagCount === 1 ? "" : "s"}`;
-  const mapCoordinates = useMemo(() => {
-    if (sharedLocation) {
-      return sharedLocation;
-    }
-    return resolveFormMapCoordinates(building);
-  }, [building, sharedLocation]);
-  const mapUrls = useMemo(
-    () =>
-      buildOpenStreetMapUrls(
-        mapCoordinates.latitude,
-        mapCoordinates.longitude,
-      ),
-    [mapCoordinates.latitude, mapCoordinates.longitude],
-  );
 
-  const detectedText = useMemo(() => {
-    if (analysisLoading) {
-      return "AI is analyzing your upload...";
-    }
-    if (!analysis) {
-      return `AI detected: Campus report - ${building}`;
-    }
-    if (analysis.extraction.mode === "fix") {
-      return `AI detected: ${toIssueLabel(analysis.extraction.issue_type)} - ${building}`;
-    }
-    return `AI detected: ${analysis.extraction.title}`;
-  }, [analysis, analysisLoading, building]);
   const fileLabel = useMemo(() => {
     if (!uploadDraft) {
       return "IMG_3847.jpg - 2.4MB";
@@ -167,124 +135,98 @@ export function TriageFormPage() {
   }, []);
 
   useEffect(() => {
-    if (!uploadDraft) {
-      return;
-    }
-    const activeDraft = uploadDraft;
+    setByokApiKey(readByokApiKey() ?? "");
+  }, []);
 
-    const nextKey = `${activeDraft.fileName}:${activeDraft.selectedAt}`;
-    if (lastAnalyzedKeyRef.current === nextKey) {
+  useEffect(() => {
+    if (!uploadDraft?.previewDataUrl) {
       return;
     }
 
-    let cancelled = false;
+    const currentDraft = uploadDraft;
+    let canceled = false;
 
     async function runAnalysis() {
-      setAnalysisLoading(true);
-      setAnalysisError(undefined);
+      setAnalysisState("loading");
+      setAnalysisSource(null);
+      setAnalysisNotice(undefined);
+
       try {
-        const mode = inferModeFromFileName(activeDraft.fileName);
         const response = await fetch("/api/analyze", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(byokApiKey.trim()
+              ? { "x-openai-api-key": byokApiKey.trim() }
+              : {}),
           },
           body: JSON.stringify({
-            mode,
-            imageDataUrl: activeDraft.previewDataUrl,
-            imageName: activeDraft.fileName,
+            mode: "fix",
+            imageDataUrl: currentDraft.previewDataUrl,
+            imageName: currentDraft.fileName,
           }),
         });
 
         if (!response.ok) {
-          throw new Error(`Analyze request failed with ${response.status}`);
+          throw new Error(`Analyze failed with status ${response.status}`);
         }
 
         const payload = (await response.json()) as AnalyzeResponse;
-        if (cancelled) {
+        if (canceled) {
           return;
         }
 
-        setAnalysis(payload);
-        if (payload.extraction.mode === "fix") {
-          setIssueSelected(true);
-          setAnnouncementSelected(false);
-          setTitle(`Issue: ${toIssueLabel(payload.extraction.issue_type)}`);
-          setDescription(payload.extraction.summary);
-          setCategory(mapFixCategory(payload.extraction.issue_type));
-          const nextLocation = splitLocationFields(payload.extraction.likely_location);
-          setBuilding(nextLocation.building);
-          setFloor(nextLocation.floor);
-        } else {
-          setIssueSelected(false);
-          setAnnouncementSelected(true);
-          setTitle(payload.extraction.title);
-          setDescription(payload.extraction.summary);
-          setCategory(mapSignalCategory(payload.extraction.title));
-          const nextLocation = splitLocationFields(payload.extraction.likely_location);
-          setBuilding(nextLocation.building);
-          setFloor(nextLocation.floor);
+        const issueType = payload.draft.suggested_issue_type;
+        const summary = payload.draft.summary;
+        const nextLocation = payload.draft.location.text.trim();
+        const nextTitle = buildTitleFromExtraction(issueType, summary);
+
+        setTitle(nextTitle);
+        setDescription(summary);
+        setCategory(mapIssueTypeToCategory(issueType));
+        setDetectedText(
+          `AI detected: ${formatIssueType(issueType)}${
+            nextLocation && nextLocation !== "Needs confirmation"
+              ? ` - ${nextLocation}`
+              : ""
+          }`,
+        );
+        setAnalysisSource(payload.source);
+        setAnalysisNotice(payload.notice);
+        setAnalysisLocation(payload.draft.location);
+        if (typeof payload.draft.location.latitude === "number") {
+          setLatitudeInput(payload.draft.location.latitude.toFixed(6));
         }
-        lastAnalyzedKeyRef.current = nextKey;
+        if (typeof payload.draft.location.longitude === "number") {
+          setLongitudeInput(payload.draft.location.longitude.toFixed(6));
+        }
+        if (nextLocation && nextLocation !== "Needs confirmation") {
+          setBuilding(nextLocation);
+        }
+
+        setAnalysisState("done");
       } catch {
-        if (cancelled) {
-          return;
-        }
-        setAnalysisError("AI analysis failed. You can still edit fields manually.");
-      } finally {
-        if (!cancelled) {
-          setAnalysisLoading(false);
+        if (!canceled) {
+          setAnalysisState("error");
+          setAnalysisSource("fallback");
+          setAnalysisNotice("Live analysis was unavailable, so demo-safe fallback values were used.");
+          setAnalysisLocation(undefined);
         }
       }
     }
 
-    runAnalysis();
+    void runAnalysis();
 
     return () => {
-      cancelled = true;
+      canceled = true;
     };
-  }, [uploadDraft]);
-
-  function shareCurrentLocation() {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setLocationError("Location sharing is not supported on this device/browser.");
-      return;
-    }
-
-    setSharingLocation(true);
-    setLocationError(undefined);
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setSharedLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-        });
-        setSharingLocation(false);
-      },
-      (error) => {
-        let message = "Unable to share location right now.";
-        if (error.code === error.PERMISSION_DENIED) {
-          message = "Location permission denied. Enable it in your browser settings.";
-        } else if (error.code === error.TIMEOUT) {
-          message = "Location request timed out. Please try again.";
-        }
-        setLocationError(message);
-        setSharingLocation(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 120000,
-      },
-    );
-  }
+  }, [uploadDraft?.previewDataUrl, uploadDraft?.fileName, byokApiKey]);
 
   function openReplacePhotoPicker() {
     replaceInputRef.current?.click();
   }
 
-  async function onReplacePhoto(event: React.ChangeEvent<HTMLInputElement>) {
+  async function onReplacePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -305,6 +247,113 @@ export function TriageFormPage() {
       event.target.value = "";
     }
   }
+
+  function getSelectedType(): UiFeedType {
+    if (issueSelected && announcementSelected) {
+      return "both";
+    }
+    if (issueSelected) {
+      return "issue";
+    }
+    if (announcementSelected) {
+      return "announcement";
+    }
+    return "issue";
+  }
+
+  function formatPostedLabel(timestampIso: string): string {
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(new Date(timestampIso));
+  }
+
+  function useBrowserLocation() {
+    if (!navigator.geolocation) {
+      setGeoStatus("Geolocation is unavailable in this browser.");
+      return;
+    }
+
+    setGeoStatus("Fetching your current location...");
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        setLatitudeInput(position.coords.latitude.toFixed(6));
+        setLongitudeInput(position.coords.longitude.toFixed(6));
+        setGeoStatus("Current location applied.");
+      },
+      () => {
+        setGeoStatus("Unable to access location. Check browser permissions.");
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
+  }
+
+  function onSubmitPost() {
+    const now = new Date().toISOString();
+    const selectedType = getSelectedType();
+    const latitude = parseCoordinate(latitudeInput) ?? analysisLocation?.latitude;
+    const longitude = parseCoordinate(longitudeInput) ?? analysisLocation?.longitude;
+    const mapUrls =
+      typeof latitude === "number" && typeof longitude === "number"
+        ? buildOpenStreetMapUrls(latitude, longitude)
+        : undefined;
+
+    try {
+      prependUiFeedPost({
+        id: `ui-post-${Date.now()}`,
+        type: selectedType,
+        urgency: selectedType === "announcement" ? undefined : "medium",
+        title: title.trim() || "Campus update",
+        body: description.trim() || "Submitted from BevoFix triage form.",
+        postedAtIso: now,
+        postedLabel: formatPostedLabel(now),
+        location: `${building.trim() || "Campus"} · ${floor.trim() || "Unknown floor"}`,
+        upvotes: 0,
+        comments: 0,
+        nearMe: true,
+        hasImage: Boolean(uploadDraft),
+        imageDataUrl: uploadDraft?.previewDataUrl,
+        latitude,
+        longitude,
+        openStreetMapEmbedUrl:
+          mapUrls?.openStreetMapEmbedUrl ?? analysisLocation?.openStreetMapEmbedUrl,
+        openStreetMapLinkUrl:
+          mapUrls?.openStreetMapLinkUrl ?? analysisLocation?.openStreetMapLinkUrl,
+      });
+    } catch (error) {
+      console.error("Failed to save UI feed post locally before navigation.", error);
+    }
+
+    router.push("/feed");
+  }
+
+  function saveByokKey() {
+    writeByokApiKey(byokApiKey);
+    setByokStatus(byokApiKey.trim() ? "Saved. Next analysis uses your key." : "Key removed.");
+  }
+
+  function clearByokKey() {
+    clearByokApiKey();
+    setByokApiKey("");
+    setByokStatus("Key removed.");
+  }
+
+  const analysisChipLabel =
+    analysisState === "loading"
+      ? "AI analyzing..."
+      : analysisState === "done"
+        ? "AI analyzed"
+        : analysisState === "error"
+          ? "AI unavailable"
+          : "AI ready";
+  const formLatitude = parseCoordinate(latitudeInput);
+  const formLongitude = parseCoordinate(longitudeInput);
+  const formMapUrls =
+    typeof formLatitude === "number" && typeof formLongitude === "number"
+      ? buildOpenStreetMapUrls(formLatitude, formLongitude)
+      : undefined;
 
   return (
     <div className="min-h-screen bg-ut-cream px-6 pb-28">
@@ -335,7 +384,7 @@ export function TriageFormPage() {
             )}
             <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-ut-charcoal/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[1.5px] text-white">
               <span className="h-2 w-2 animate-pulseDot rounded-full bg-[#6EE7A0]" />
-              {analysisLoading ? "AI analyzing..." : "AI analysis ready"}
+              {analysisChipLabel}
             </div>
             <button
               type="button"
@@ -349,33 +398,6 @@ export function TriageFormPage() {
             <span className="font-mono text-xs text-ut-mid">{fileLabel}</span>
             <span className="text-xs font-semibold text-ut-burnt">✦ Fields auto-filled</span>
           </div>
-          <div className="border-t border-ut-faint/70 px-5 pb-4 pt-3">
-            <button
-              type="button"
-              onClick={shareCurrentLocation}
-              disabled={sharingLocation}
-              className="rounded-full bg-ut-burnt px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-ut-burntHover disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {sharingLocation
-                ? "Sharing location..."
-                : sharedLocation
-                  ? "Update shared location"
-                  : "Share my location"}
-            </button>
-            {sharedLocation ? (
-              <p className="mt-2 font-mono text-[11px] text-ut-mid">
-                Shared location: {sharedLocation.latitude.toFixed(5)},{" "}
-                {sharedLocation.longitude.toFixed(5)}
-              </p>
-            ) : (
-              <p className="mt-2 text-[11px] text-ut-mid">
-                Optional: share your current location to improve the map preview.
-              </p>
-            )}
-            {locationError ? (
-              <p className="mt-1 text-[11px] font-semibold text-[#9A3412]">{locationError}</p>
-            ) : null}
-          </div>
         </div>
 
         <div className="mb-6 flex items-start gap-3 rounded-utSm border border-ut-burnt/20 bg-gradient-to-br from-[#FFF5EE] to-[#FFEEDD] px-5 py-4">
@@ -383,14 +405,53 @@ export function TriageFormPage() {
           <div>
             <h2 className="text-sm font-bold text-ut-burnt">{detectedText}</h2>
             <p className="text-xs leading-5 text-ut-brown">
-              {analysis?.notice ??
+              {analysisNotice ||
                 "We pre-filled the fields below. Review and edit anything before posting."}
             </p>
-            {analysisError ? (
-              <p className="mt-1 text-[11px] font-semibold text-[#9A3412]">{analysisError}</p>
-            ) : null}
           </div>
         </div>
+
+        <section className="mb-6 rounded-ut bg-ut-white p-5 shadow-utSm">
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
+            Bring your own key
+          </p>
+          <p className="mb-3 text-xs leading-5 text-ut-mid">
+            Add your OpenAI API key to enable live AI image detection. If empty, the demo-safe fallback remains active.
+          </p>
+          <input
+            type="password"
+            value={byokApiKey}
+            onChange={(event) => {
+              setByokApiKey(event.target.value);
+              if (byokStatus) {
+                setByokStatus(undefined);
+              }
+            }}
+            placeholder="sk-..."
+            autoComplete="off"
+            spellCheck={false}
+            className="mb-3 w-full rounded-xl border border-ut-faint bg-ut-cream px-3 py-2 text-sm font-medium text-ut-charcoal outline-none focus:border-ut-burnt"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={saveByokKey}
+              className="rounded-full border border-ut-faint bg-ut-white px-3 py-1.5 text-xs font-semibold text-ut-mid hover:border-ut-mid"
+            >
+              Save key
+            </button>
+            <button
+              type="button"
+              onClick={clearByokKey}
+              className="rounded-full border border-ut-faint bg-ut-white px-3 py-1.5 text-xs font-semibold text-ut-mid hover:border-ut-mid"
+            >
+              Clear
+            </button>
+            <span className="text-xs text-ut-mid">
+              {byokStatus ?? "Stored in browser localStorage only."}
+            </span>
+          </div>
+        </section>
 
         <div className="space-y-4">
           <section className="rounded-ut bg-ut-white p-6 shadow-utSm">
@@ -434,7 +495,7 @@ export function TriageFormPage() {
               Time of incident
             </p>
             <div className="flex items-center gap-3">
-              <span className="font-mono text-sm font-medium text-ut-charcoal">Now - {toNowString()}</span>
+              <span className="font-mono text-sm font-medium text-ut-charcoal">{incidentTime}</span>
               <button className="rounded-lg bg-[#FFF0E6] px-2 py-1 text-xs font-semibold text-ut-burnt">
                 Change
               </button>
@@ -442,33 +503,31 @@ export function TriageFormPage() {
           </section>
 
           <section className="overflow-hidden rounded-ut bg-ut-white shadow-utSm">
-            <div className="relative h-44 overflow-hidden border-y border-ut-faint/70 bg-[#E8EFEA]">
-              <iframe
-                title={`OpenStreetMap preview near ${building || "PCL study area"}`}
-                src={mapUrls.openStreetMapEmbedUrl}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-                className="h-full w-full border-0"
-              />
-            </div>
+            {formMapUrls ? (
+              <div className="relative h-44">
+                <iframe
+                  title="Selected location map"
+                  src={formMapUrls.openStreetMapEmbedUrl}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                  className="h-full w-full border-0"
+                />
+                <div className="absolute bottom-2 right-2 rounded bg-white/85 px-2 py-0.5 text-[10px] font-semibold text-ut-mid">
+                  © OpenStreetMap contributors
+                </div>
+              </div>
+            ) : (
+              <div className="map-grid-fine relative flex h-44 items-center justify-center bg-gradient-to-br from-[#C8E0C8] via-[#B0D0B8] to-[#A8CCA8]">
+                <p className="rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-ut-mid">
+                  Add coordinates to preview real map pin
+                </p>
+              </div>
+            )}
 
             <div className="p-6">
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <p className="text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
-                  Location{" "}
-                  <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">
-                    AI filled
-                  </span>
-                </p>
-                <a
-                  href={mapUrls.openStreetMapLinkUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs font-semibold text-ut-burnt hover:text-ut-burntHover"
-                >
-                  Open larger map
-                </a>
-              </div>
+              <p className="mb-3 text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
+                Location <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">AI filled</span>
+              </p>
               <div className="mb-3 grid grid-cols-2 gap-3">
                 <div className="rounded-xl bg-ut-cream p-3">
                   <p className="mb-1 text-[10px] font-bold uppercase tracking-[1.5px] text-ut-mid">
@@ -490,6 +549,40 @@ export function TriageFormPage() {
                     className="w-full border-none bg-transparent text-sm font-medium text-ut-charcoal outline-none"
                   />
                 </div>
+              </div>
+              <div className="mb-3 grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-ut-cream p-3">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[1.5px] text-ut-mid">
+                    Latitude
+                  </p>
+                  <input
+                    value={latitudeInput}
+                    onChange={(event) => setLatitudeInput(event.target.value)}
+                    placeholder="30.286050"
+                    className="w-full border-none bg-transparent text-sm font-medium text-ut-charcoal outline-none"
+                  />
+                </div>
+                <div className="rounded-xl bg-ut-cream p-3">
+                  <p className="mb-1 text-[10px] font-bold uppercase tracking-[1.5px] text-ut-mid">
+                    Longitude
+                  </p>
+                  <input
+                    value={longitudeInput}
+                    onChange={(event) => setLongitudeInput(event.target.value)}
+                    placeholder="-97.741420"
+                    className="w-full border-none bg-transparent text-sm font-medium text-ut-charcoal outline-none"
+                  />
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={useBrowserLocation}
+                  className="rounded-full border border-ut-faint bg-ut-white px-3 py-1.5 text-xs font-semibold text-ut-mid hover:border-ut-mid"
+                >
+                  Use my location
+                </button>
+                {geoStatus ? <span className="text-xs text-ut-mid">{geoStatus}</span> : null}
               </div>
             </div>
           </section>
@@ -556,14 +649,20 @@ export function TriageFormPage() {
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-30 flex justify-center bg-gradient-to-t from-ut-cream via-ut-cream/90 to-transparent px-6 py-4">
-        <Link
-          href="/feed"
-          className="flex w-full max-w-[540px] items-center justify-center gap-2 rounded-full bg-ut-burnt px-8 py-4 text-base font-bold text-white shadow-[0_8px_32px_rgba(192,80,26,0.4)] transition hover:bg-ut-burntHover"
+        <button
+          type="button"
+          onClick={onSubmitPost}
+          disabled={flagCount === 0}
+          className={`flex w-full max-w-[540px] items-center justify-center gap-2 rounded-full px-8 py-4 text-base font-bold text-white shadow-[0_8px_32px_rgba(192,80,26,0.4)] transition ${
+            flagCount === 0
+              ? "cursor-not-allowed bg-ut-mid"
+              : "bg-ut-burnt hover:bg-ut-burntHover"
+          }`}
         >
           Post to BevoFix
           <span className="rounded-full bg-white/25 px-2 py-0.5 text-xs">{submitLabel}</span>
           →
-        </Link>
+        </button>
       </div>
 
       <input

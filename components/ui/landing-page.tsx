@@ -48,6 +48,22 @@ export function LandingPage() {
             <h1 className="font-display text-5xl font-black leading-none tracking-tight text-ut-charcoal">
               Bevo<span className="text-ut-burnt">Fix</span>
             </h1>
+            <div className="mx-auto mt-4 max-w-[520px] text-center">
+              <p className="text-sm font-semibold text-ut-charcoal">
+                Made for the Open AI Academy Hackathon 2026
+              </p>
+              <p className="mt-1 text-sm text-ut-mid">
+                by Raghu and Keenan,
+              </p>
+              <a
+                href="https://github.com/RogueTex/UTCodexHackathon26"
+                target="_blank"
+                rel="noreferrer"
+                className="mt-1 inline-block text-sm font-semibold text-ut-burnt hover:text-ut-burntHover"
+              >
+                Click here for the entire Repo!
+              </a>
+            </div>
           </div>
 
           <p className="mb-12 font-display text-4xl font-black leading-tight tracking-tight text-ut-charcoal md:text-6xl">
