@@ -1,21 +1,49 @@
 import { PRODUCT_NAME } from "@/lib/bevofix";
+import { logMetadataEvent } from "@/lib/debug";
 import { getExampleById } from "@/lib/demo-fixtures";
 import { buildLocationHint, prefersMetadataLocation } from "@/lib/location-hints";
 import { normalizeIssueType, resolveTeamFromIssue } from "@/lib/routing";
 import {
   AnalyzeRequest,
   AnalyzeResponse,
+  AssistantDraft,
+  DetectedType,
   Extraction,
+  buildAssistantDraftFromExtraction,
+  normalizeAssistantDraft,
   normalizeExtraction,
 } from "@/lib/types";
 
 const WORKFLOW_LABELS = [
-  "Triage Skill",
   "Extraction Skill",
   "Routing Skill",
-  "Metadata Skill",
+  "Publishing Skill",
+  "Location Skill",
   "Validation Skill",
 ];
+
+function inferDetectedType(request: AnalyzeRequest): DetectedType {
+  if (request.mode === "signal") {
+    return "broadcast";
+  }
+  if (request.mode === "fix") {
+    return "issue";
+  }
+
+  const content = request.notes?.toLowerCase() ?? "";
+  if (
+    content.includes("pizza") ||
+    content.includes("food") ||
+    content.includes("study") ||
+    content.includes("seating") ||
+    content.includes("event") ||
+    content.includes("open tables")
+  ) {
+    return "broadcast";
+  }
+
+  return "issue";
+}
 
 function buildFallbackFix(notes: string | undefined): Extraction {
   const issueType = normalizeIssueType(notes);
@@ -52,40 +80,88 @@ function buildFallbackSignal(notes: string | undefined): Extraction {
   });
 }
 
+function applyLocationHint(
+  draft: AssistantDraft,
+  request: AnalyzeRequest,
+  locationHint = buildLocationHint(request.photoMetadata),
+): {
+  draft: AssistantDraft;
+  locationHint?: AnalyzeResponse["locationHint"];
+} {
+  if (!locationHint || !prefersMetadataLocation(draft.location.text)) {
+    return { draft, locationHint };
+  }
+
+  const nextDraft = normalizeAssistantDraft({
+    ...draft,
+    captured_at: request.photoMetadata?.capturedAt ?? draft.captured_at,
+    location: {
+      text: locationHint.label,
+      source: "metadata",
+      confidence: "Exact metadata",
+      latitude: locationHint.latitude,
+      longitude: locationHint.longitude,
+      precision: locationHint.precision,
+      openStreetMapEmbedUrl: locationHint.openStreetMapEmbedUrl,
+      openStreetMapLinkUrl: locationHint.openStreetMapLinkUrl,
+    },
+  });
+
+  logMetadataEvent("metadata hint applied to assistant draft", {
+    mode: request.mode,
+    finalLocation: nextDraft.location.text,
+  });
+
+  return { draft: nextDraft, locationHint };
+}
+
 function buildFallbackResponse(request: AnalyzeRequest): AnalyzeResponse {
   const example = getExampleById(request.exampleId);
   const metadata = request.photoMetadata ?? example?.photoMetadata;
   const locationHint = buildLocationHint(metadata);
-  if (example && example.mode === request.mode) {
-    const extraction = normalizeExtraction(request.mode, example.fallbackExtraction);
-    if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
-      extraction.likely_location = locationHint.label;
-    }
+
+  logMetadataEvent("building fallback analysis", {
+    mode: request.mode,
+    exampleId: request.exampleId,
+    hasMetadata: Boolean(metadata),
+    metadataHint: locationHint?.label,
+  });
+
+  if (example && (!request.mode || example.mode === request.mode)) {
+    const extraction = normalizeExtraction(example.mode, example.fallbackExtraction);
+    const seededDraft = buildAssistantDraftFromExtraction(extraction, {
+      locationHint,
+      capturedAt: request.photoMetadata?.capturedAt,
+    });
+    const applied = applyLocationHint(seededDraft, request, locationHint);
 
     return {
-      extraction,
+      draft: applied.draft,
       source: "fallback",
       workflowLabels: WORKFLOW_LABELS,
-      locationHint,
+      locationHint: applied.locationHint,
       notice: locationHint
         ? "Fallback analysis used for a stable demo-safe result. Photo metadata provided a location hint."
         : "Fallback analysis used for a stable demo-safe result.",
     };
   }
 
+  const detectedType = inferDetectedType(request);
   const extraction =
-    request.mode === "fix"
+    detectedType === "issue"
       ? buildFallbackFix(request.notes)
       : buildFallbackSignal(request.notes);
-  if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
-    extraction.likely_location = locationHint.label;
-  }
+  const genericDraft = buildAssistantDraftFromExtraction(extraction, {
+    locationHint,
+    capturedAt: request.photoMetadata?.capturedAt,
+  });
+  const applied = applyLocationHint(genericDraft, request, locationHint);
 
   return {
-    extraction,
+    draft: applied.draft,
     source: "fallback",
     workflowLabels: WORKFLOW_LABELS,
-    locationHint,
+    locationHint: applied.locationHint,
     notice: locationHint
       ? "Fallback analysis used because no live model result was available. Photo metadata provided a location hint."
       : "Fallback analysis used because no live model result was available.",
@@ -94,21 +170,27 @@ function buildFallbackResponse(request: AnalyzeRequest): AnalyzeResponse {
 
 async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
 
   if (!apiKey || !request.imageDataUrl) {
+    logMetadataEvent("live analysis skipped", {
+      reason: !apiKey ? "missing OPENAI_API_KEY" : "missing image data",
+      hasPhotoMetadata: Boolean(request.photoMetadata),
+    });
     return null;
   }
 
-  const schemaHint =
-    request.mode === "fix"
-      ? '{ "mode": "fix", "issue_type": "...", "summary": "...", "likely_location": "...", "urgency": "low|medium|high", "suggested_team": "...", "confidence": 0.0, "needs_user_confirmation": true }'
-      : '{ "mode": "signal", "title": "...", "summary": "...", "likely_location": "...", "expiration_time": "...", "confidence": 0.0, "needs_user_confirmation": true }';
+  const schemaHint = `{ "detected_type": "issue|broadcast", "summary": "...", "captured_at": "ISO datetime if known or current estimate", "confidence": 0.0, "needs_user_confirmation": true, "suggested_issue_type": "...", "suggested_urgency": "low|medium|high", "suggested_team": "...", "suggested_title": "...", "suggested_expiration_time": "...", "location": { "text": "...", "source": "inferred", "confidence": "Estimated location" }, "tags": ["..."] }`;
 
   const prompt = [
     `You are the ${PRODUCT_NAME} Extraction Skill.`,
     `Return only JSON matching this schema: ${schemaHint}`,
+    "Inspect the uploaded image carefully for campus issues, useful student updates, readable signs, severity cues, and location clues.",
+    "The UX is upload-first. Decide whether the photo is best treated as an issue or a broadcast, but still fill both issue and broadcast suggestion fields when possible.",
     "Be concise, campus-specific, and safe. If uncertain, use 'Needs confirmation'.",
+    request.mode
+      ? `Compatibility hint: the user entered through ${request.mode} mode, so bias the suggestions slightly toward that downstream action.`
+      : "No downstream mode hint was provided. Infer the best fit from the photo and notes.",
     request.notes ? `Student notes: ${request.notes}` : "Student notes: none provided.",
     request.photoMetadata
       ? `Photo metadata GPS hint: ${request.photoMetadata.latitude}, ${request.photoMetadata.longitude}`
@@ -154,18 +236,15 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
     throw new Error("Model response missing output_text");
   }
 
-  const extraction = normalizeExtraction(request.mode, JSON.parse(rawText));
-  const locationHint = buildLocationHint(request.photoMetadata);
-  if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
-    extraction.likely_location = locationHint.label;
-  }
+  const draft = normalizeAssistantDraft(JSON.parse(rawText));
+  const applied = applyLocationHint(draft, request);
 
   return {
-    extraction,
+    draft: applied.draft,
     source: "live",
     workflowLabels: WORKFLOW_LABELS,
-    locationHint,
-    notice: locationHint
+    locationHint: applied.locationHint,
+    notice: applied.locationHint
       ? "Photo metadata contributed a location hint for review."
       : undefined,
   };

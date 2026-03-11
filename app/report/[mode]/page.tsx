@@ -14,6 +14,5 @@ export default async function ReportModePage({
     notFound();
   }
 
-  return <ReportPageClient mode={mode} />;
+  return <ReportPageClient intent={mode} />;
 }
-

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { analyzeSubmission } from "@/lib/ai";
 import { isMode } from "@/lib/bevofix";
+import { logMetadataEvent } from "@/lib/debug";
 
 export const dynamic = "force-dynamic";
 
@@ -20,17 +21,35 @@ export async function POST(request: Request) {
     };
   };
 
-  if (!body.mode || !isMode(body.mode)) {
+  if (body.mode && !isMode(body.mode)) {
     return NextResponse.json({ error: "Invalid mode." }, { status: 400 });
   }
 
+  const mode = body.mode && isMode(body.mode) ? body.mode : undefined;
+
+  logMetadataEvent("analyze route received request", {
+    mode,
+    exampleId: body.exampleId,
+    hasPhotoMetadata: Boolean(body.photoMetadata),
+    latitude: body.photoMetadata?.latitude,
+    longitude: body.photoMetadata?.longitude,
+  });
+
   const analysis = await analyzeSubmission({
-    mode: body.mode,
+    mode,
     imageDataUrl: body.imageDataUrl,
     imageName: body.imageName,
     notes: body.notes,
     exampleId: body.exampleId,
     photoMetadata: body.photoMetadata,
+  });
+
+  logMetadataEvent("analyze route returning response", {
+    mode,
+    source: analysis.source,
+    detectedType: analysis.draft.detected_type,
+    extractedLocation: analysis.draft.location.text,
+    metadataHint: analysis.locationHint?.label,
   });
 
   return NextResponse.json(analysis);

@@ -14,6 +14,5 @@ export default async function ReviewModePage({
     notFound();
   }
 
-  return <ReviewPageClient mode={mode} />;
+  return <ReviewPageClient preferredMode={mode} />;
 }
-
