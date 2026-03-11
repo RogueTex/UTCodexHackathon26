@@ -1,14 +1,33 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type MouseEvent,
+  type PointerEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   fileToDataUrl,
   readUiUploadDraft,
-  UiUploadDraft,
+  type UiUploadDraft,
   writeUiUploadDraft,
 } from "@/lib/ui-upload-draft";
+
+type AnalyzeApiResponse = {
+  extraction: {
+    mode: "fix";
+    issue_type: string;
+    summary: string;
+    likely_location: string;
+  };
+  source: "live" | "fallback";
+  notice?: string;
+};
 
 const CATEGORY_OPTIONS = [
   "Furniture & Fixtures",
@@ -32,9 +51,49 @@ function toNowString(): string {
   }).format(new Date());
 }
 
+function formatIssueType(issueType: string): string {
+  return issueType
+    .split("/")
+    .map((part) => part.trim())
+    .join(" / ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function mapIssueTypeToCategory(issueType: string): string {
+  const normalized = issueType.trim().toLowerCase();
+  if (normalized.includes("light") || normalized.includes("electrical")) {
+    return "Lighting";
+  }
+  if (normalized.includes("furniture") || normalized.includes("chair")) {
+    return "Furniture & Fixtures";
+  }
+  if (normalized.includes("water")) {
+    return "Restrooms";
+  }
+  if (
+    normalized.includes("wifi") ||
+    normalized.includes("internet") ||
+    normalized.includes("charger") ||
+    normalized.includes("computer")
+  ) {
+    return "WiFi / Tech";
+  }
+  if (normalized.includes("clean")) {
+    return "Restrooms";
+  }
+  return "Furniture & Fixtures";
+}
+
+function buildTitleFromExtraction(issueType: string, summary: string): string {
+  const issueLabel = formatIssueType(issueType);
+  const clippedSummary = summary.trim().slice(0, 80);
+  return clippedSummary ? `${issueLabel}: ${clippedSummary}` : issueLabel;
+}
+
 export function TriageFormPage() {
   const mapRef = useRef<HTMLDivElement | null>(null);
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
+
   const [issueSelected, setIssueSelected] = useState(true);
   const [announcementSelected, setAnnouncementSelected] = useState(true);
   const [building, setBuilding] = useState("PCL Library");
@@ -42,14 +101,107 @@ export function TriageFormPage() {
   const [pin, setPin] = useState({ x: 50, y: 50 });
   const [uploadDraft, setUploadDraft] = useState<UiUploadDraft>();
 
+  const [title, setTitle] = useState("Broken chair leg in PCL 3rd floor study area");
+  const [description, setDescription] = useState(
+    "Chair leg is cracked and poses a fall risk. Right side, near the window row. About 3 chairs affected.",
+  );
+  const [category, setCategory] = useState("Furniture & Fixtures");
+  const [incidentTime] = useState(() => `Now - ${toNowString()}`);
+  const [analysisState, setAnalysisState] = useState<"idle" | "loading" | "done" | "error">(
+    "idle",
+  );
+  const [analysisSource, setAnalysisSource] = useState<"live" | "fallback" | null>(null);
+  const [analysisNotice, setAnalysisNotice] = useState<string | undefined>();
+  const [detectedText, setDetectedText] = useState("AI detected: Broken chair - PCL Library");
+
   const flagCount = Number(issueSelected) + Number(announcementSelected);
   const submitLabel = `${flagCount} flag${flagCount === 1 ? "" : "s"}`;
 
-  function onMapPointer(
-    event:
-      | React.PointerEvent<HTMLDivElement>
-      | React.MouseEvent<HTMLDivElement, MouseEvent>,
-  ) {
+  const fileLabel = useMemo(() => {
+    if (!uploadDraft) {
+      return "IMG_3847.jpg - 2.4MB";
+    }
+    const sizeMb = (uploadDraft.fileSizeBytes / (1024 * 1024)).toFixed(1);
+    return `${uploadDraft.fileName} - ${sizeMb}MB`;
+  }, [uploadDraft]);
+
+  useEffect(() => {
+    setUploadDraft(readUiUploadDraft());
+  }, []);
+
+  useEffect(() => {
+    if (!uploadDraft?.previewDataUrl) {
+      return;
+    }
+
+    const currentDraft = uploadDraft;
+    let canceled = false;
+
+    async function runAnalysis() {
+      setAnalysisState("loading");
+      setAnalysisSource(null);
+      setAnalysisNotice(undefined);
+
+      try {
+        const response = await fetch("/api/analyze", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            mode: "fix",
+            imageDataUrl: currentDraft.previewDataUrl,
+            imageName: currentDraft.fileName,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Analyze failed with status ${response.status}`);
+        }
+
+        const payload = (await response.json()) as AnalyzeApiResponse;
+        if (canceled) {
+          return;
+        }
+
+        const extraction = payload.extraction;
+        const nextLocation = extraction.likely_location.trim();
+        const nextTitle = buildTitleFromExtraction(extraction.issue_type, extraction.summary);
+
+        setTitle(nextTitle);
+        setDescription(extraction.summary);
+        setCategory(mapIssueTypeToCategory(extraction.issue_type));
+        setDetectedText(
+          `AI detected: ${formatIssueType(extraction.issue_type)}${
+            nextLocation && nextLocation !== "Needs confirmation"
+              ? ` - ${nextLocation}`
+              : ""
+          }`,
+        );
+        setAnalysisSource(payload.source);
+        setAnalysisNotice(payload.notice);
+        if (nextLocation && nextLocation !== "Needs confirmation") {
+          setBuilding(nextLocation);
+        }
+
+        setAnalysisState("done");
+      } catch {
+        if (!canceled) {
+          setAnalysisState("error");
+          setAnalysisSource("fallback");
+          setAnalysisNotice("Live analysis was unavailable, so demo-safe fallback values were used.");
+        }
+      }
+    }
+
+    void runAnalysis();
+
+    return () => {
+      canceled = true;
+    };
+  }, [uploadDraft?.previewDataUrl, uploadDraft?.fileName]);
+
+  function onMapPointer(event: PointerEvent<HTMLDivElement> | MouseEvent<HTMLDivElement>) {
     if (!mapRef.current) {
       return;
     }
@@ -63,27 +215,11 @@ export function TriageFormPage() {
     });
   }
 
-  const detectedText = useMemo(
-    () => `AI detected: Broken chair - ${building}`,
-    [building],
-  );
-  const fileLabel = useMemo(() => {
-    if (!uploadDraft) {
-      return "IMG_3847.jpg - 2.4MB";
-    }
-    const sizeMb = (uploadDraft.fileSizeBytes / (1024 * 1024)).toFixed(1);
-    return `${uploadDraft.fileName} - ${sizeMb}MB`;
-  }, [uploadDraft]);
-
-  useEffect(() => {
-    setUploadDraft(readUiUploadDraft());
-  }, []);
-
   function openReplacePhotoPicker() {
     replaceInputRef.current?.click();
   }
 
-  async function onReplacePhoto(event: React.ChangeEvent<HTMLInputElement>) {
+  async function onReplacePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) {
       return;
@@ -104,6 +240,17 @@ export function TriageFormPage() {
       event.target.value = "";
     }
   }
+
+  const analysisChipLabel =
+    analysisState === "loading"
+      ? "AI analyzing..."
+      : analysisState === "done" && analysisSource === "live"
+        ? "AI analyzed (live)"
+        : analysisState === "done"
+          ? "AI analyzed (fallback)"
+          : analysisState === "error"
+            ? "AI unavailable"
+            : "AI ready";
 
   return (
     <div className="min-h-screen bg-ut-cream px-6 pb-28">
@@ -134,7 +281,7 @@ export function TriageFormPage() {
             )}
             <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-full bg-ut-charcoal/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[1.5px] text-white">
               <span className="h-2 w-2 animate-pulseDot rounded-full bg-[#6EE7A0]" />
-              AI analyzing...
+              {analysisChipLabel}
             </div>
             <button
               type="button"
@@ -155,7 +302,8 @@ export function TriageFormPage() {
           <div>
             <h2 className="text-sm font-bold text-ut-burnt">{detectedText}</h2>
             <p className="text-xs leading-5 text-ut-brown">
-              We pre-filled the fields below. Review and edit anything before posting.
+              {analysisNotice ||
+                "We pre-filled the fields below. Review and edit anything before posting."}
             </p>
           </div>
         </div>
@@ -166,7 +314,8 @@ export function TriageFormPage() {
               Title <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">AI filled</span>
             </p>
             <input
-              defaultValue="Broken chair leg in PCL 3rd floor study area"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
               className="w-full border-none bg-transparent text-base font-medium text-ut-charcoal outline-none"
             />
           </section>
@@ -175,7 +324,8 @@ export function TriageFormPage() {
             <p className="mb-3 text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">Description</p>
             <textarea
               rows={3}
-              defaultValue="Chair leg is cracked and poses a fall risk. Right side, near the window row. About 3 chairs affected."
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
               className="w-full resize-none border-none bg-transparent text-base font-medium leading-6 text-ut-charcoal outline-none"
             />
           </section>
@@ -184,7 +334,11 @@ export function TriageFormPage() {
             <p className="mb-3 text-[11px] font-bold uppercase tracking-[2.5px] text-ut-mid">
               Category <span className="rounded-full bg-[#FFF0E6] px-2 py-0.5 text-[9px] text-ut-burnt">AI filled</span>
             </p>
-            <select className="w-full appearance-none border-none bg-transparent text-base font-medium text-ut-charcoal outline-none">
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value)}
+              className="w-full appearance-none border-none bg-transparent text-base font-medium text-ut-charcoal outline-none"
+            >
               {CATEGORY_OPTIONS.map((option) => (
                 <option key={option}>{option}</option>
               ))}
@@ -196,7 +350,7 @@ export function TriageFormPage() {
               Time of incident
             </p>
             <div className="flex items-center gap-3">
-              <span className="font-mono text-sm font-medium text-ut-charcoal">Now - {toNowString()}</span>
+              <span className="font-mono text-sm font-medium text-ut-charcoal">{incidentTime}</span>
               <button className="rounded-lg bg-[#FFF0E6] px-2 py-1 text-xs font-semibold text-ut-burnt">
                 Change
               </button>

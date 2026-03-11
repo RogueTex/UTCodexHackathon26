@@ -4,4 +4,4 @@ dist
 storage/*.json
 !.gitkeep
 *.log
-
+.env.local

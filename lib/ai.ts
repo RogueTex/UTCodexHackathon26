@@ -94,7 +94,7 @@ function buildFallbackResponse(request: AnalyzeRequest): AnalyzeResponse {
 
 async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+  const model = process.env.OPENAI_MODEL || "gpt-4.1";
 
   if (!apiKey || !request.imageDataUrl) {
     return null;
@@ -108,6 +108,7 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
   const prompt = [
     `You are the ${PRODUCT_NAME} Extraction Skill.`,
     `Return only JSON matching this schema: ${schemaHint}`,
+    "Focus on the primary actionable issue in the photo, not background objects.",
     "Be concise, campus-specific, and safe. If uncertain, use 'Needs confirmation'.",
     request.notes ? `Student notes: ${request.notes}` : "Student notes: none provided.",
     request.photoMetadata
@@ -138,6 +139,7 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
           ],
         },
       ],
+      temperature: 0.2,
     }),
   });
 
@@ -147,14 +149,31 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
 
   const payload = (await response.json()) as {
     output_text?: string;
+    output?: Array<{
+      content?: Array<{
+        type?: string;
+        text?: string;
+      }>;
+    }>;
   };
-  const rawText = payload.output_text;
 
-  if (!rawText) {
+  const outputText =
+    payload.output_text ||
+    payload.output
+      ?.flatMap((item) => item.content ?? [])
+      .find((contentItem) => contentItem.type === "output_text" && contentItem.text)
+      ?.text;
+
+  if (!outputText) {
     throw new Error("Model response missing output_text");
   }
 
-  const extraction = normalizeExtraction(request.mode, JSON.parse(rawText));
+  const sanitizedText = outputText
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+  const extraction = normalizeExtraction(request.mode, JSON.parse(sanitizedText));
   const locationHint = buildLocationHint(request.photoMetadata);
   if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
     extraction.likely_location = locationHint.label;
