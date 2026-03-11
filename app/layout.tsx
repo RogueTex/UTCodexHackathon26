@@ -1,12 +1,7 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import type { ReactNode } from "react";
 
-import {
-  PRODUCT_NAME,
-  PRODUCT_STATEMENT,
-  PRODUCT_TAGLINE,
-} from "@/lib/bevofix";
+import { PRODUCT_NAME, PRODUCT_STATEMENT } from "@/lib/bevofix";
 
 import "./globals.css";
 
@@ -22,20 +17,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-        <div className="site-shell">
-          <header className="site-header">
-            <Link href="/" className="brand-mark">
-              <span className="brand-kicker">UT campus-tech</span>
-              <strong>{PRODUCT_NAME}</strong>
-            </Link>
-            <div className="header-copy">
-              <span>{PRODUCT_TAGLINE}</span>
-            </div>
-          </header>
-          <main>{children}</main>
-        </div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
