@@ -1,5 +1,7 @@
 # BevoFix
 
+## **DEMO VIDEO: [WATCH HERE](https://www.loom.com/share/1e8583a0a1184f0193b6c7fc426135ae)**
+
 **BevoFix** is a local-first campus AI triage platform built for the UT Austin Codex Hackathon.
 
 It turns student photos into structured campus action through two focused workflows:
@@ -60,31 +62,31 @@ Validate extraction normalization, location metadata behavior, and cross-route s
 - **Persistence**: local JSON store (`storage/bevofix-store.json`) for hackathon-safe reproducibility.
 - **Maps/Location**: EXIF-assisted hints + OpenStreetMap embeds to increase location specificity.
 
-## Judging Alignment (25% each)
+## Rubric Mapping (25% each)
 ### 1) Demo (25%)
-- Complete scenario from image upload to actionable output in both Fix and Signal modes.
-- Review gate clearly demonstrates AI-to-action with user control.
-- Dashboard shows immediate system response and status updates.
+- Implemented flow: image upload -> AI analysis -> review/edit -> submit.
+- Both Fix and Signal pathways are present in the product flow.
+- Dashboard/feed surfaces submitted records and status changes.
 
 ### 2) Impact (25%)
-- Solves a recurring student pain point: observations are currently lost or unstructured.
-- Increases speed and quality of reporting while preserving student context.
-- Improves campus responsiveness by standardizing triage-ready submissions.
+- Targets a recurring campus reporting gap where observations are often unstructured.
+- Converts photo + notes into structured, reviewable records.
+- Adds routing metadata to make issues/signals easier to act on.
 
 ### 3) Usage of Codex Application (25%)
 - Codex-assisted architecture and implementation across route design, API scaffolding, and workflow composition.
-- Codex terminal control + worktree workflows were used to safely parallelize feature work, hotfixes, and merge-ready validation.
-- BYOK, fallback AI orchestration, deterministic reference matching, and review UX were iterated rapidly with Codex in the loop.
-- Codex-driven test/build verification (`npm test`, `npm run build`) was used repeatedly before demo sign-off.
+- Codex terminal control + worktree workflows were used to parallelize feature work, hotfixes, and merge validation.
+- BYOK, fallback AI orchestration, deterministic reference matching, and review UX were implemented with Codex iteration.
+- Codex-driven verification was used via `npm test` and `npm run build`.
 
 ### 4) Creative Usage of Codex Skills (25%)
-- **Yeet skill**: staged, committed, pushed, and prepared PR-ready workflows with GitHub CLI automation.
-- **Notion skills** (`notion-spec-to-implementation`, `notion-knowledge-capture`, `notion-meeting-intelligence`): transformed specs/meeting notes into implementation plans, decision logs, and progress-tracking docs.
-- **Playwright skill**: browser automation for end-to-end checks (`/form -> /feed`, submit flows, regression checks) during rapid UI iteration.
-- **Imagegen skill**: generated synthetic test visuals for vision-style edge cases to stress-test AI extraction behavior and fallback matching quality.
-- **Frontend-design skill**: accelerated UI polish while preserving a cohesive product identity for demo clarity.
-- **Create-plan + gh-fix-ci workflows**: structured execution plans and fast debugging loops for reliability under hackathon timelines.
-- Overall: skills were used as an engineering system (planning, coding, validation, docs, release), not just code autocomplete.
+- **Yeet skill**: staged, committed, pushed, and prepared PR workflows with GitHub CLI automation.
+- **Notion skills** (`notion-spec-to-implementation`, `notion-knowledge-capture`, `notion-meeting-intelligence`): converted specs/meeting notes into plans, decision logs, and progress docs.
+- **Playwright skill**: browser automation for end-to-end checks (`/form -> /feed`, submit flows, regression checks).
+- **Imagegen skill**: generated synthetic visuals for vision-style edge cases to test extraction behavior and fallback matching.
+- **Frontend-design skill**: used for UI polish and consistency.
+- **Create-plan + gh-fix-ci workflows**: used for planning and debugging loops.
+- Skills were used across planning, coding, validation, documentation, and release flow.
 
 ## Local Development
 ```bash
@@ -97,9 +99,6 @@ npm run dev
 - In `/form` or `/report/[mode]`, paste an OpenAI API key (`sk-...`) in the **Bring your own key** input.
 - Click **Save key** to persist it in browser localStorage.
 - Analyze requests then use your key via `x-openai-api-key`; if no key is provided, the app uses deterministic fallback behavior.
-
-## Demo Video
-- [BevoFix Demo Recording (Loom)](https://www.loom.com/share/1e8583a0a1184f0193b6c7fc426135ae)
 
 ## Validation Commands
 ```bash
