@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { Mode } from "@/lib/bevofix";
+import { LocationHint, PhotoMetadata } from "@/lib/location-hints";
 import { normalizeIssueType, resolveTeamFromIssue } from "@/lib/routing";
 
 export const urgencyValues = ["low", "medium", "high"] as const;
@@ -38,6 +39,7 @@ export type AnalyzeRequest = {
   imageName?: string;
   notes?: string;
   exampleId?: string;
+  photoMetadata?: PhotoMetadata;
 };
 
 export type AnalyzeResponse = {
@@ -45,6 +47,7 @@ export type AnalyzeResponse = {
   source: AnalysisSource;
   workflowLabels: string[];
   notice?: string;
+  locationHint?: LocationHint;
 };
 
 export type FixTicket = FixExtraction & {
@@ -163,4 +166,3 @@ export function parseFixSubmission(input: unknown): FixExtraction {
 export function parseSignalSubmission(input: unknown): SignalExtraction {
   return normalizeSignalExtraction(input);
 }
-

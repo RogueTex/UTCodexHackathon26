@@ -7,6 +7,11 @@ export const DEMO_EXAMPLES = [
     title: "Broken charger station",
     description: "PCL study area charger spot with a dead screen and loose cable.",
     imagePath: "/demo/fix-charger.svg",
+    photoMetadata: {
+      latitude: 30.28282,
+      longitude: -97.73812,
+      source: "seeded-demo" as const,
+    },
     fallbackExtraction: {
       mode: "fix",
       issue_type: "charger station / computer issue",
@@ -25,6 +30,11 @@ export const DEMO_EXAMPLES = [
     title: "Free pizza pop-up",
     description: "Free pizza sign outside the Union until 2 PM.",
     imagePath: "/demo/signal-pizza.svg",
+    photoMetadata: {
+      latitude: 30.28605,
+      longitude: -97.74142,
+      source: "seeded-demo" as const,
+    },
     fallbackExtraction: {
       mode: "signal",
       title: "Free pizza at the Union",
@@ -41,4 +51,3 @@ export const DEMO_EXAMPLES = [
 export function getExampleById(exampleId: string | undefined) {
   return DEMO_EXAMPLES.find((example) => example.id === exampleId);
 }
-

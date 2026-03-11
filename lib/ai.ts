@@ -1,5 +1,6 @@
 import { PRODUCT_NAME } from "@/lib/bevofix";
 import { getExampleById } from "@/lib/demo-fixtures";
+import { buildLocationHint, prefersMetadataLocation } from "@/lib/location-hints";
 import { normalizeIssueType, resolveTeamFromIssue } from "@/lib/routing";
 import {
   AnalyzeRequest,
@@ -12,6 +13,7 @@ const WORKFLOW_LABELS = [
   "Triage Skill",
   "Extraction Skill",
   "Routing Skill",
+  "Metadata Skill",
   "Validation Skill",
 ];
 
@@ -52,23 +54,41 @@ function buildFallbackSignal(notes: string | undefined): Extraction {
 
 function buildFallbackResponse(request: AnalyzeRequest): AnalyzeResponse {
   const example = getExampleById(request.exampleId);
+  const metadata = request.photoMetadata ?? example?.photoMetadata;
+  const locationHint = buildLocationHint(metadata);
   if (example && example.mode === request.mode) {
+    const extraction = normalizeExtraction(request.mode, example.fallbackExtraction);
+    if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
+      extraction.likely_location = locationHint.label;
+    }
+
     return {
-      extraction: normalizeExtraction(request.mode, example.fallbackExtraction),
+      extraction,
       source: "fallback",
       workflowLabels: WORKFLOW_LABELS,
-      notice: "Fallback analysis used for a stable demo-safe result.",
+      locationHint,
+      notice: locationHint
+        ? "Fallback analysis used for a stable demo-safe result. Photo metadata provided a location hint."
+        : "Fallback analysis used for a stable demo-safe result.",
     };
   }
 
+  const extraction =
+    request.mode === "fix"
+      ? buildFallbackFix(request.notes)
+      : buildFallbackSignal(request.notes);
+  if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
+    extraction.likely_location = locationHint.label;
+  }
+
   return {
-    extraction:
-      request.mode === "fix"
-        ? buildFallbackFix(request.notes)
-        : buildFallbackSignal(request.notes),
+    extraction,
     source: "fallback",
     workflowLabels: WORKFLOW_LABELS,
-    notice: "Fallback analysis used because no live model result was available.",
+    locationHint,
+    notice: locationHint
+      ? "Fallback analysis used because no live model result was available. Photo metadata provided a location hint."
+      : "Fallback analysis used because no live model result was available.",
   };
 }
 
@@ -90,6 +110,9 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
     `Return only JSON matching this schema: ${schemaHint}`,
     "Be concise, campus-specific, and safe. If uncertain, use 'Needs confirmation'.",
     request.notes ? `Student notes: ${request.notes}` : "Student notes: none provided.",
+    request.photoMetadata
+      ? `Photo metadata GPS hint: ${request.photoMetadata.latitude}, ${request.photoMetadata.longitude}`
+      : "Photo metadata GPS hint: unavailable.",
   ].join("\n");
 
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -131,10 +154,20 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
     throw new Error("Model response missing output_text");
   }
 
+  const extraction = normalizeExtraction(request.mode, JSON.parse(rawText));
+  const locationHint = buildLocationHint(request.photoMetadata);
+  if (locationHint && prefersMetadataLocation(extraction.likely_location)) {
+    extraction.likely_location = locationHint.label;
+  }
+
   return {
-    extraction: normalizeExtraction(request.mode, JSON.parse(rawText)),
+    extraction,
     source: "live",
     workflowLabels: WORKFLOW_LABELS,
+    locationHint,
+    notice: locationHint
+      ? "Photo metadata contributed a location hint for review."
+      : undefined,
   };
 }
 
@@ -152,4 +185,3 @@ export async function analyzeSubmission(
 
   return buildFallbackResponse(request);
 }
-
