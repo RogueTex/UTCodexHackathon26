@@ -20,6 +20,13 @@ const WORKFLOW_LABELS = [
   "Validation Skill",
 ];
 
+function logAnalyze(event: string, metadata: Record<string, unknown>): void {
+  if (process.env.NODE_ENV === "test") {
+    return;
+  }
+  console.info(`[bevofix:analyze] ${event} ${JSON.stringify(metadata)}`);
+}
+
 const LOCAL_REFERENCE_FILE = path.join(
   process.cwd(),
   "DataImages",
@@ -240,6 +247,7 @@ function buildFallbackSignal(notes: string | undefined): Extraction {
 }
 
 async function buildFallbackResponse(request: AnalyzeRequest): Promise<AnalyzeResponse> {
+  const startedAt = Date.now();
   const example = getExampleById(request.exampleId);
   const metadata = request.photoMetadata ?? example?.photoMetadata;
   const locationHint = buildLocationHint(metadata);
@@ -257,14 +265,16 @@ async function buildFallbackResponse(request: AnalyzeRequest): Promise<AnalyzeRe
       notice: locationHint
         ? "Fallback analysis used for a stable demo-safe result. Photo metadata provided a location hint."
         : "Fallback analysis used for a stable demo-safe result.",
-      };
+    };
   }
 
+  const localRefStartedAt = Date.now();
   const localReferenceMatch = await matchLocalReferenceEmbedding({
     mode: request.mode,
     imageName: request.imageName,
     notes: request.notes,
   });
+  const localRefMs = Date.now() - localRefStartedAt;
   if (localReferenceMatch) {
     const extraction = normalizeExtraction(
       request.mode,
@@ -293,7 +303,7 @@ async function buildFallbackResponse(request: AnalyzeRequest): Promise<AnalyzeRe
     extraction.likely_location = locationHint.label;
   }
 
-  return {
+  const response: AnalyzeResponse = {
     extraction,
     source: "fallback",
     workflowLabels: WORKFLOW_LABELS,
@@ -302,6 +312,14 @@ async function buildFallbackResponse(request: AnalyzeRequest): Promise<AnalyzeRe
       ? "Fallback analysis used because no live model result was available. Photo metadata provided a location hint."
       : "Fallback analysis used because no live model result was available.",
   };
+  logAnalyze("fallback_complete", {
+    mode: request.mode,
+    imageName: request.imageName ?? "n/a",
+    totalMs: Date.now() - startedAt,
+    localReferenceMatchMs: localRefMs,
+    localReferenceMatched: Boolean(localReferenceMatch),
+  });
+  return response;
 }
 
 function inferLikelyLocation(value: string): string | undefined {
@@ -452,18 +470,30 @@ function buildLiveSignalExtraction(
 }
 
 async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse | null> {
+  const startedAt = Date.now();
   const apiKey = process.env.HUGGINGFACE_API_KEY || process.env.HF_API_KEY;
   const model = process.env.HUGGINGFACE_VISION_MODEL || "facebook/detr-resnet-50";
 
   if (!apiKey || !request.imageDataUrl) {
+    logAnalyze("live_skipped", {
+      mode: request.mode,
+      imageName: request.imageName ?? "n/a",
+      reason: !apiKey ? "missing_hf_key" : "missing_image_data_url",
+    });
     return null;
   }
 
   const decodedImage = decodeImageDataUrl(request.imageDataUrl);
   if (!decodedImage) {
+    logAnalyze("live_skipped", {
+      mode: request.mode,
+      imageName: request.imageName ?? "n/a",
+      reason: "invalid_data_url",
+    });
     return null;
   }
 
+  const hfStartedAt = Date.now();
   const response = await fetch(
     `https://router.huggingface.co/hf-inference/models/${encodeURIComponent(model)}`,
     {
@@ -476,6 +506,7 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
       body: decodedImage.bytes as unknown as BodyInit,
     },
   );
+  const hfMs = Date.now() - hfStartedAt;
 
   if (!response.ok) {
     throw new Error(`Model request failed with ${response.status}`);
@@ -483,12 +514,14 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
 
   const payload = (await response.json()) as unknown;
   const caption = extractCaption(payload);
+  const localRefStartedAt = Date.now();
   const localReferenceMatch = await matchLocalReferenceEmbedding({
     mode: request.mode,
     imageName: request.imageName,
     notes: request.notes,
     caption,
   });
+  const localRefMs = Date.now() - localRefStartedAt;
   const extraction = localReferenceMatch
     ? normalizeExtraction(request.mode, localReferenceMatch.entry.extraction)
     : request.mode === "fix"
@@ -499,7 +532,7 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
     extraction.likely_location = locationHint.label;
   }
 
-  return {
+  const responsePayload: AnalyzeResponse = {
     extraction,
     source: "live",
     workflowLabels: WORKFLOW_LABELS,
@@ -512,19 +545,59 @@ async function runLiveAnalysis(request: AnalyzeRequest): Promise<AnalyzeResponse
         ? "Live analysis used. Photo metadata contributed a location hint for review."
         : "Live analysis used.",
   };
+  logAnalyze("live_complete", {
+    mode: request.mode,
+    imageName: request.imageName ?? "n/a",
+    model,
+    hfMs,
+    localReferenceMatchMs: localRefMs,
+    localReferenceMatched: Boolean(localReferenceMatch),
+    source: responsePayload.source,
+    totalMs: Date.now() - startedAt,
+  });
+  return responsePayload;
 }
 
 export async function analyzeSubmission(
   request: AnalyzeRequest,
 ): Promise<AnalyzeResponse> {
+  const startedAt = Date.now();
   try {
     const liveResponse = await runLiveAnalysis(request);
     if (liveResponse) {
+      logAnalyze("request_complete", {
+        mode: request.mode,
+        imageName: request.imageName ?? "n/a",
+        source: liveResponse.source,
+        totalMs: Date.now() - startedAt,
+      });
       return liveResponse;
     }
-  } catch {
-    return await buildFallbackResponse(request);
+  } catch (error) {
+    logAnalyze("live_error", {
+      mode: request.mode,
+      imageName: request.imageName ?? "n/a",
+      message: error instanceof Error ? error.message : String(error),
+      totalMs: Date.now() - startedAt,
+    });
+    const fallbackAfterError = await buildFallbackResponse(request);
+    logAnalyze("request_complete", {
+      mode: request.mode,
+      imageName: request.imageName ?? "n/a",
+      source: fallbackAfterError.source,
+      totalMs: Date.now() - startedAt,
+      fallbackReason: "live_error",
+    });
+    return fallbackAfterError;
   }
 
-  return await buildFallbackResponse(request);
+  const fallbackResponse = await buildFallbackResponse(request);
+  logAnalyze("request_complete", {
+    mode: request.mode,
+    imageName: request.imageName ?? "n/a",
+    source: fallbackResponse.source,
+    totalMs: Date.now() - startedAt,
+    fallbackReason: "live_not_available",
+  });
+  return fallbackResponse;
 }
